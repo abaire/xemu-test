@@ -37,12 +37,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Cache Test XBE ISO
-        id: cache-test-xbe
+      - name: Cache Test Data
+        id: cache-test-data
         uses: actions/cache@v6
         with:
-          path: xemutest/data/TestXBE/tester.iso
-          key: test-xbe-${{ hashFiles('test-xbe/**') }}
+          path: xemutest/data
+          key: test-data-${{ hashFiles('test-xbe/**', 'scripts/fetch_test_requirements.py') }}
 
       - name: Build Test Data
         run: bash ./scripts/build_test_data.sh
