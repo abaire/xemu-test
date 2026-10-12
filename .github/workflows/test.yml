@@ -43,5 +43,111 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: '!cancelled()'
         with:
-          name: results
+          name: results-self-hosted
+          path: results
+
+  test-roswell:
+    name: Test (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install xemu-pgraph-ci-tools
+        run: |
+          pip install git+https://github.com/abaire/xemu-pgraph-ci-tools.git
+
+      - name: Download Official xemu Release
+        shell: bash
+        run: |
+          mkdir -p assets
+          python3 -c "
+          import os, sys
+          from xemu_pgraph_ci_tools.github import download_xemu
+          xemu_path = download_xemu('assets', 'latest')
+          if not xemu_path or not os.path.exists(xemu_path):
+              sys.exit('Failed to download official xemu release')
+          if os.path.isfile(xemu_path):
+              os.chmod(xemu_path, 0o755)
+          target_path = 'assets/xemu.exe' if sys.platform == 'win32' else ('assets/xemu.app' if sys.platform == 'darwin' else 'assets/xemu')
+          if xemu_path != target_path and os.path.exists(xemu_path):
+              os.rename(xemu_path, target_path)
+          print(f'Successfully prepared xemu binary at {target_path}')
+          "
+
+      - name: Download Roswell BIOS Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          mkdir -p assets
+          gh release download \
+            --repo mborgerson/roswell \
+            --pattern "*flash.bin" \
+            --output assets/roswell.bin
+
+      - name: Configure Local Filesystem (Private Directory)
+        shell: bash
+        run: |
+          mkdir -p private
+          cp assets/roswell.bin private/bios.bin
+
+      - name: Setup Linux Display & Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qy
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libgl1-mesa-dri libgl1 libglx-mesa0 libegl1 libosmesa6 \
+            libsdl2-2.0-0 libepoxy0 libpixman-1-0 libslirp0 libsamplerate0 \
+            libpipewire-0.3-0 libpcap0.8 libfuse2t64
+
+      - name: Setup venv & Install xemutest
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          activate-environment: true
+          python-version: "3.12"
+
+      - name: Install Local xemutest Package
+        run: |
+          uv pip install .
+
+      - name: Run Tests (Linux)
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          MESA_LOADER_DRIVER_OVERRIDE: "llvmpipe"
+          SDL_AUDIODRIVER: "dummy"
+        run: |
+          mkdir -p results
+          xvfb-run -s "-screen 0 640x480x24" python -m xemutest --no-mcpx -v assets/xemu private results
+
+      - name: Run Tests (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory -Force -Path results
+          python -m xemutest --no-mcpx -v assets/xemu.exe private results
+
+      - name: Run Tests (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p results
+          python -m xemutest --no-mcpx -v assets/xemu.app/Contents/MacOS/xemu private results
+
+      - name: Upload results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: '!cancelled()'
+        with:
+          name: results-${{ matrix.os }}
           path: results
