@@ -34,7 +34,10 @@ class XemuManager:
         self._init_config()
 
         assert self.flash_path.is_file()
-        assert self.mcpx_path.is_file()
+        if self.test_env.require_mcpx:
+            assert self.mcpx_path.is_file()
+        else:
+            self.mcpx_path = ""
 
         if platform.system() == "Windows":
             self.app: pywinauto.application.Application | None = None
@@ -67,6 +70,7 @@ bootrom_path = '{self.mcpx_path}'
 flashrom_path = '{self.flash_path}'
 hdd_path = '{self.hdd_path}'
 """
+
 
     def launch(self, log_file):
         """Launch xemu and wait for it to complete or timeout."""

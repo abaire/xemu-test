@@ -17,7 +17,14 @@ def main():
     ap.add_argument("xemu", help="Path to the xemu binary")
     ap.add_argument("private", help="Path to private data files")
     ap.add_argument("results", help="Path to directory where results should go")
+    ap.add_argument("--data", help="Path to test data directory")
     ap.add_argument("--ffmpeg", help="Path to the ffmpeg binary")
+
+    ap.add_argument(
+        "--no-mcpx",
+        action="store_true",
+        help="Suppress the requirement for an MCPX boot ROM (e.g. when using Roswell BIOS)",
+    )
     ap.add_argument(
         "-v", "--verbose", action="store_true", help="Print verbose logging information"
     )
@@ -33,8 +40,11 @@ def main():
     this_dir = Path(__file__).resolve().parent
     xemu_path = Path(args.xemu).expanduser().resolve()
     private_path = Path(args.private).expanduser().resolve()
-    test_data_root = this_dir / "data"
+    test_data_root = (
+        Path(args.data).expanduser().resolve() if args.data else (this_dir / "data")
+    )
     ffmpeg_path = Path(args.ffmpeg).expanduser().resolve() if args.ffmpeg else None
+
 
     # Validate required paths
     errors = []
@@ -76,6 +86,7 @@ def main():
         private_path,
         xemu_path,
         ffmpeg_path,
+        require_mcpx=not args.no_mcpx,
     )
 
     test_results_summary: dict[str, TestResult] = {}
