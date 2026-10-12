@@ -90,11 +90,41 @@ jobs:
             libsdl2-2.0-0 libepoxy0 libpixman-1-0 libslirp0 libsamplerate0 \
             libpipewire-0.3-0 libpcap0.8 libfuse2t64
 
+      - name: Verify & Inspect xemu Binary
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          MESA_LOADER_DRIVER_OVERRIDE: "llvmpipe"
+          SDL_AUDIODRIVER: "dummy"
+        run: |
+          RUNNER_CMD="python3 -c"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            RUNNER_CMD="xvfb-run -s '-screen 0 640x480x24' python3 -c"
+          fi
+          $RUNNER_CMD "
+          import os, sys
+          from xemu_pgraph_ci_tools import get_xemu_info
+
+          xemu_path = 'assets/xemu.exe' if sys.platform == 'win32' else ('assets/xemu.app' if sys.platform == 'darwin' else 'assets/xemu')
+          print(f'Inspecting xemu binary at {xemu_path}...')
+          try:
+              info = get_xemu_info(xemu_path)
+              print('--- xemu Execution Verified ---')
+              print(f'Emulator Version: {info.emulator_version}')
+              if info.machine_info:
+                  print('Machine Info:\n' + info.machine_info)
+              if info.failure_info:
+                  print('Failure Info:\n' + info.failure_info)
+          except Exception as e:
+              sys.exit(f'Failed to execute xemu binary: {e}')
+          "
+
       - name: Setup venv & Install xemutest
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
           activate-environment: true
           python-version: "3.12"
+
 
       - name: Install Local xemutest Package
         run: |
