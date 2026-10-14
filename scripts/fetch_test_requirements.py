@@ -15,6 +15,7 @@ from pathlib import Path
 NV2A_TAG = "v2026-10-14_14-04-36-282794375"
 NV2A_TESTS = [
     "m2mf_test_xiso",
+    "ptimer_alarm_test_xiso",
 ]
 
 CPU_TAG = "v2026-10-14_14-16-39-135792892"
