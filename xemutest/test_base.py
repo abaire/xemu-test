@@ -54,6 +54,29 @@ class TestResult:
         """Returns True if the test did not fail (passed or unverified)."""
         return not self.status.is_failure
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize this TestResult to a JSON-compatible dictionary."""
+        return {
+            "name": self.name,
+            "status": str(self.status),
+            "message": self.message,
+            "duration": self.duration,
+            "location_url": self.location_url,
+            "subtests": [s.to_dict() for s in self.subtests],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TestResult:
+        """Deserialize a TestResult from a dictionary produced by to_dict."""
+        return cls(
+            name=data["name"],
+            status=TestStatus(data["status"]),
+            message=data.get("message", ""),
+            duration=data.get("duration", ""),
+            location_url=data.get("location_url", ""),
+            subtests=[cls.from_dict(s) for s in data.get("subtests", [])],
+        )
+
     def add_subresult(
         self,
         name: str,

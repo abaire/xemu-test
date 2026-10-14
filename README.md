@@ -83,3 +83,15 @@ the build:
 The `xemu_test_repository` and `xemu_test_ref` inputs select which xemu-test
 sources are used, which is useful for testing changes to xemu-test itself from a
 fork of xemu.
+
+Partitioned Test Runs
+---------------------
+Test suites may be split across multiple runners. `--num-partitions N` and
+`--partition-index I` select a deterministic subset of the suites to run, and
+each run writes a `summary.json` to its results directory. The summaries can be
+merged with `--aggregate-results DIR [DIR ...] --aggregate-output OUT_DIR`. Use
+`--count` or `--list-partitions` to inspect how suites will be distributed.
+
+The `Test Roswell` workflow uses a single partition per OS by default; set the
+`max_parallelism` input to fan out across more runners (`0` runs each suite on
+its own runner).

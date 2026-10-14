@@ -38,3 +38,10 @@ extend-ignore = ["S101"]
 "xemutest/ci.py" = ["T201"]
 # Test modules are loaded by file name, not as a package.
 "xemutest/tests/**" = ["INP001"]
+# Unit tests for the harness itself.
+"tests/**" = ["INP001"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

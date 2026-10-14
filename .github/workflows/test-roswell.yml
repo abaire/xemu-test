@@ -18,6 +18,11 @@ on:
         required: false
         default: false
         type: boolean
+      max_parallelism:
+        description: "Maximum number of parallel test partitions per OS (0 for one per test suite)"
+        required: false
+        default: 1
+        type: number
   # Allows other repositories (e.g., xemu) to run these tests against build
   # artifacts produced earlier in the same workflow run. Results are reported
   # as checks on the caller's run (and thus its PRs).
@@ -48,6 +53,11 @@ on:
         required: false
         default: false
         type: boolean
+      max_parallelism:
+        description: "Maximum number of parallel test partitions per OS (0 for one per test suite)"
+        required: false
+        default: 1
+        type: number
   pull_request:
     branches: [master]
   push:
@@ -61,6 +71,9 @@ jobs:
   prepare-data:
     name: Prepare Test Data
     runs-on: ubuntu-latest
+    outputs:
+      partition-matrix: ${{ steps.plan-partitions.outputs.matrix }}
+      partition-count: ${{ steps.plan-partitions.outputs.count }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -73,6 +86,44 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+
+      - name: Setup venv & Install xemutest
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          activate-environment: true
+          python-version: "3.12"
+
+      - name: Install Local xemutest Package
+        run: |
+          uv pip install . pytest
+
+      - name: Run Harness Unit Tests
+        run: |
+          python -m pytest tests
+
+      - name: Plan Test Partitions
+        id: plan-partitions
+        env:
+          # Empty for push/pull_request events, in which case a single partition is used.
+          MAX_PARALLELISM: ${{ inputs.max_parallelism }}
+        run: |
+          test_count=$(python -m xemutest --count)
+          max_parallelism="${MAX_PARALLELISM:-1}"
+
+          if [ "$max_parallelism" -gt 0 ] && [ "$max_parallelism" -lt "$test_count" ]; then
+            partition_count=$max_parallelism
+          else
+            partition_count=$test_count
+          fi
+          if [ "$partition_count" -lt 1 ]; then
+            partition_count=1
+          fi
+
+          matrix=$(python -c "import json, sys; print(json.dumps(list(range(int(sys.argv[1])))))" "$partition_count")
+          echo "Discovered $test_count test suites, splitting into $partition_count partition(s)"
+          python -m xemutest --list-partitions --num-partitions "$partition_count"
+          echo "count=$partition_count" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
       - name: Cache Test Data
         id: cache-test-data
@@ -128,13 +179,14 @@ jobs:
           retention-days: 1
 
   test-roswell:
-    name: Test (${{ matrix.os }})
+    name: Test (${{ matrix.os }}, partition ${{ matrix.partition }})
     needs: prepare-data
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        partition: ${{ fromJson(needs.prepare-data.outputs.partition-matrix) }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -310,6 +362,8 @@ jobs:
                   -v \
                   --no-hard-fpu \
                   --failure-filter failure_filters/linux_roswell_softfpu.json \
+                  --num-partitions ${{ needs.prepare-data.outputs.partition-count }} \
+                  --partition-index ${{ matrix.partition }} \
                   assets/xemu \
                   private \
                   results
@@ -324,7 +378,9 @@ jobs:
               "--sysram", "128",
               "--no-hard-fpu",
               "--failure-filter", "failure_filters/windows_roswell_softfpu.json",
-              "--ci-summary-omit-innermost-passed-subtests"
+              "--ci-summary-omit-innermost-passed-subtests",
+              "--num-partitions", "${{ needs.prepare-data.outputs.partition-count }}",
+              "--partition-index", "${{ matrix.partition }}"
           )
           $ffmpegPath = "${{ steps.setup-ffmpeg.outputs.ffmpeg-path }}"
           if ($ffmpegPath) {
@@ -349,6 +405,8 @@ jobs:
               --ci-summary-omit-innermost-passed-subtests \
               -v \
               --failure-filter failure_filters/macos_roswell.json \
+              --num-partitions ${{ needs.prepare-data.outputs.partition-count }} \
+              --partition-index ${{ matrix.partition }} \
               assets/xemu.app/Contents/MacOS/xemu \
               private \
               results
@@ -393,12 +451,77 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: crash-dumps-${{ matrix.os }}
+          name: crash-dumps-${{ matrix.os }}-partition-${{ matrix.partition }}
           path: crash_dumps
           if-no-files-found: ignore
           retention-days: 5
 
-      - name: Upload results
+      - name: Upload Partition Results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: '!cancelled()'
+        with:
+          name: results-${{ matrix.os }}-partition-${{ matrix.partition }}
+          path: results
+          retention-days: 1
+
+  aggregate-results:
+    name: Aggregate Results (${{ matrix.os }})
+    needs: [prepare-data, test-roswell]
+    if: '!cancelled()'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ inputs.xemu_test_repository || github.repository }}
+          ref: ${{ inputs.xemu_test_ref || '' }}
+
+      - name: Setup venv & Install xemutest
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          activate-environment: true
+          python-version: "3.12"
+
+      - name: Install Local xemutest Package
+        run: |
+          uv pip install .
+
+      - name: Download Partition Results
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          pattern: results-${{ matrix.os }}-partition-*
+          path: partition-results
+
+      - name: Merge Results
+        run: |
+          shopt -s nullglob
+          mkdir -p results
+          partition_dirs=()
+          for dir in partition-results/*/; do
+            partition_dirs+=("${dir%/}")
+            # Per-test result directories are disjoint across partitions.
+            find "$dir" -mindepth 1 -maxdepth 1 -not -name summary.json -exec cp -r -t results {} +
+          done
+
+          # Every expected partition must be checked, even if it failed to upload results.
+          expected=${{ needs.prepare-data.outputs.partition-count }}
+          for i in $(seq 0 $((expected - 1))); do
+            dir="partition-results/results-${{ matrix.os }}-partition-$i"
+            if [ ! -d "$dir" ]; then
+              partition_dirs+=("$dir")
+            fi
+          done
+
+          python -m xemutest \
+              --ci-summary-omit-innermost-passed-subtests \
+              --aggregate-output results \
+              --aggregate-results "${partition_dirs[@]}"
+
+      - name: Upload Results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: '!cancelled()'
         with:
